@@ -1,30 +1,32 @@
 #Requires -Modules Pester
 
-$script:ScriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'Install-Widevine.ps1'
-. $script:ScriptPath
+BeforeAll {
+    $script:ScriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'Install-Widevine.ps1'
+    . $script:ScriptPath
+}
 
 Describe 'Resolve-WidevineArchitecture' {
     It 'keeps arm64 rather than downgrading it to x64' {
         Mock Get-PeArchitecture { 'arm64' }
         Mock Test-Path { $true }
-        Resolve-WidevineArchitecture -BinaryPath 'C:\fake\chrome.exe' | Should Be 'arm64'
+        Resolve-WidevineArchitecture -BinaryPath 'C:\fake\chrome.exe' | Should -Be 'arm64'
     }
 
     It 'mirrors the target binary architecture for x64' {
         Mock Get-PeArchitecture { 'x64' }
         Mock Test-Path { $true }
-        Resolve-WidevineArchitecture -BinaryPath 'C:\fake\chrome.exe' | Should Be 'x64'
+        Resolve-WidevineArchitecture -BinaryPath 'C:\fake\chrome.exe' | Should -Be 'x64'
     }
 
     It 'mirrors the target binary architecture for x86' {
         Mock Get-PeArchitecture { 'x86' }
         Mock Test-Path { $true }
-        Resolve-WidevineArchitecture -BinaryPath 'C:\fake\chrome.exe' | Should Be 'x86'
+        Resolve-WidevineArchitecture -BinaryPath 'C:\fake\chrome.exe' | Should -Be 'x86'
     }
 
     It 'falls back to the host architecture when no binary is given' {
-        $arch = Resolve-WidevineArchitecture -BinaryPath $null
-        (@('x64', 'x86', 'arm64') -contains $arch) | Should Be $true
+        Resolve-WidevineArchitecture -BinaryPath $null |
+            Should -BeIn @('x64', 'x86', 'arm64')
     }
 }
 
@@ -66,27 +68,27 @@ Describe 'Resolve-WidevineDownload' {
         )
 
         $result = Resolve-WidevineDownload -UpdateApp $app
-        $result.Urls.Count | Should Be 3
-        $result.Urls | ForEach-Object { $_ | Should Match '^https://' }
+        $result.Urls.Count | Should -Be 3
+        $result.Urls | ForEach-Object { $_ | Should -BeLike 'https://*' }
     }
 
     It 'refuses a response offering only plaintext mirrors' {
         $app = New-UpdateApp -Urls @([pscustomobject]@{ url = 'http://dl.google.com/a.crx3' })
-        { Resolve-WidevineDownload -UpdateApp $app } | Should Throw 'HTTPS'
+        { Resolve-WidevineDownload -UpdateApp $app } | Should -Throw '*HTTPS*'
     }
 
     It 'refuses a response with no SHA-256, rather than installing unverified' {
         $app = New-UpdateApp `
             -Urls @([pscustomobject]@{ url = 'https://dl.google.com/a.crx3' }) `
             -Sha256 ''
-        { Resolve-WidevineDownload -UpdateApp $app } | Should Throw 'SHA-256'
+        { Resolve-WidevineDownload -UpdateApp $app } | Should -Throw '*SHA-256*'
     }
 
     It 'returns nothing when Google reports no update' {
         $app = New-UpdateApp `
             -Urls @([pscustomobject]@{ url = 'https://dl.google.com/a.crx3' }) `
             -Status 'noupdate'
-        Resolve-WidevineDownload -UpdateApp $app | Should BeNullOrEmpty
+        Resolve-WidevineDownload -UpdateApp $app | Should -BeNullOrEmpty
     }
 }
 
@@ -95,7 +97,7 @@ Describe 'Get-Sha256Hex' {
         $file = Join-Path $TestDrive 'sample.bin'
         [System.IO.File]::WriteAllBytes($file, [byte[]]@(0x61, 0x62, 0x63))  # "abc"
         Get-Sha256Hex -Path $file |
-            Should Be 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+            Should -Be 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
     }
 }
 
@@ -119,7 +121,7 @@ Describe 'Test-WidevineLayout' {
             'x-cdm-codecs'             = 'vp8,vp09,avc1,av01'
         } | ConvertTo-Json)
 
-        Test-WidevineLayout -VersionDirectory $script:Dir -Architecture 'x64' | Should Be $true
+        Test-WidevineLayout -VersionDirectory $script:Dir -Architecture 'x64' | Should -BeTrue
     }
 
     It 'rejects a manifest missing the x-cdm keys Chromium requires' {
@@ -127,7 +129,7 @@ Describe 'Test-WidevineLayout' {
             version = '4.10.3050.0'
         } | ConvertTo-Json)
 
-        Test-WidevineLayout -VersionDirectory $script:Dir -Architecture 'x64' | Should Be $false
+        Test-WidevineLayout -VersionDirectory $script:Dir -Architecture 'x64' | Should -BeFalse
     }
 
     It 'rejects a layout for a different architecture' {
@@ -138,7 +140,7 @@ Describe 'Test-WidevineLayout' {
             'x-cdm-codecs'             = 'vp8'
         } | ConvertTo-Json)
 
-        Test-WidevineLayout -VersionDirectory $script:Dir -Architecture 'arm64' | Should Be $false
+        Test-WidevineLayout -VersionDirectory $script:Dir -Architecture 'arm64' | Should -BeFalse
     }
 }
 
@@ -154,7 +156,7 @@ Describe 'Expand-ZipArchive' {
 
         $dest = Join-Path $TestDrive 'out'
         Expand-ZipArchive -ZipPath $zip -DestinationPath $dest
-        Get-Content -LiteralPath (Join-Path $dest 'nested\file.txt') | Should Be 'payload'
+        Get-Content -LiteralPath (Join-Path $dest 'nested\file.txt') | Should -Be 'payload'
     }
 
     It 'refuses an entry that escapes the destination (zip slip)' {
@@ -172,67 +174,62 @@ Describe 'Expand-ZipArchive' {
 
         $dest = Join-Path $TestDrive 'out-evil'
         { Expand-ZipArchive -ZipPath $zip -DestinationPath $dest } |
-            Should Throw 'outside the destination'
+            Should -Throw '*outside the destination*'
     }
 }
 
 Describe 'ConvertTo-CrxExtensionId' {
     It 'maps a known key to its Chromium extension ID' {
         ConvertTo-CrxExtensionId -SubjectPublicKeyInfo ([byte[]](1..32)) |
-            Should Be 'kocbgmcopfcehkdhicmbdfopkchjkdoe'
+            Should -Be 'kocbgmcopfcehkdhicmbdfopkchjkdoe'
     }
 
     It 'always produces 32 characters in the a-p alphabet' {
         $id = ConvertTo-CrxExtensionId -SubjectPublicKeyInfo ([byte[]](1..64))
-        $id.Length | Should Be 32
-        $id | Should Match '^[a-p]{32}$'
+        $id.Length | Should -Be 32
+        $id | Should -Match '^[a-p]{32}$'
     }
 }
 
 Describe 'ConvertFrom-DerUnsignedInteger' {
     It 'strips the DER sign-padding byte' {
-        $res = ConvertFrom-DerUnsignedInteger -Bytes ([byte[]]@(0x00, 0xFF, 0x01))
-        $exp = [System.BitConverter]::ToString([byte[]]@(0xFF, 0x01))
-        [System.BitConverter]::ToString($res) | Should Be $exp
+        ConvertFrom-DerUnsignedInteger -Bytes ([byte[]]@(0x00, 0xFF, 0x01)) |
+            Should -Be ([byte[]]@(0xFF, 0x01))
     }
 
     It 'leaves an unpadded value alone' {
-        $res = ConvertFrom-DerUnsignedInteger -Bytes ([byte[]]@(0x01, 0x00, 0x01))
-        $exp = [System.BitConverter]::ToString([byte[]]@(0x01, 0x00, 0x01))
-        [System.BitConverter]::ToString($res) | Should Be $exp
+        ConvertFrom-DerUnsignedInteger -Bytes ([byte[]]@(0x01, 0x00, 0x01)) |
+            Should -Be ([byte[]]@(0x01, 0x00, 0x01))
     }
 
     It 'preserves a single zero byte rather than emptying it' {
-        $res = ConvertFrom-DerUnsignedInteger -Bytes ([byte[]]@(0x00))
-        $exp = [System.BitConverter]::ToString([byte[]]@(0x00))
-        [System.BitConverter]::ToString($res) | Should Be $exp
+        ConvertFrom-DerUnsignedInteger -Bytes ([byte[]]@(0x00)) | Should -Be ([byte[]]@(0x00))
     }
 }
 
 Describe 'Read-ProtobufFields' {
     It 'reads a length-delimited field' {
         $fields = Read-ProtobufFields -Data ([byte[]]@(0x0A, 0x03, 0x61, 0x62, 0x63))
-        @($fields).Count | Should Be 1
-        $fields[0].FieldNumber | Should Be 1
-        [System.Text.Encoding]::ASCII.GetString($fields[0].Value) | Should Be 'abc'
+        $fields.Count | Should -Be 1
+        $fields[0].FieldNumber | Should -Be 1
+        [System.Text.Encoding]::ASCII.GetString($fields[0].Value) | Should -Be 'abc'
     }
 
     It 'reads high field numbers that need a multi-byte key varint' {
         $fields = Read-ProtobufFields -Data ([byte[]]@(0x82, 0xF1, 0x04, 0x01, 0x07))
-        $fields[0].FieldNumber | Should Be 10000
-        $exp = [System.BitConverter]::ToString([byte[]]@(0x07))
-        [System.BitConverter]::ToString($fields[0].Value) | Should Be $exp
+        $fields[0].FieldNumber | Should -Be 10000
+        $fields[0].Value | Should -Be ([byte[]]@(0x07))
     }
 
     It 'skips varint fields without treating them as data' {
         $fields = Read-ProtobufFields -Data ([byte[]]@(0x08, 0xAC, 0x02, 0x12, 0x02, 0x68, 0x69))
-        @($fields).Count | Should Be 1
-        $fields[0].FieldNumber | Should Be 2
-        [System.Text.Encoding]::ASCII.GetString($fields[0].Value) | Should Be 'hi'
+        $fields.Count | Should -Be 1
+        $fields[0].FieldNumber | Should -Be 2
+        [System.Text.Encoding]::ASCII.GetString($fields[0].Value) | Should -Be 'hi'
     }
 
     It 'rejects a field whose length overruns the buffer' {
-        { Read-ProtobufFields -Data ([byte[]]@(0x0A, 0x7F, 0x61)) } | Should Throw 'overruns'
+        { Read-ProtobufFields -Data ([byte[]]@(0x0A, 0x7F, 0x61)) } | Should -Throw '*overruns*'
     }
 }
 
@@ -241,7 +238,7 @@ Describe 'Test-Crx3Signature' {
         $file = Join-Path $TestDrive 'not.crx3'
         [System.IO.File]::WriteAllBytes($file, [byte[]](1..64))
         { Test-Crx3Signature -CrxPath $file -ExpectedExtensionId ('a' * 32) } |
-            Should Throw 'not a CRX archive'
+            Should -Throw '*not a CRX archive*'
     }
 
     It 'rejects an unsupported CRX version' {
@@ -252,7 +249,7 @@ Describe 'Test-Crx3Signature' {
         $bytes.AddRange([System.BitConverter]::GetBytes([uint32]0))
         [System.IO.File]::WriteAllBytes($file, $bytes.ToArray())
         { Test-Crx3Signature -CrxPath $file -ExpectedExtensionId ('a' * 32) } |
-            Should Throw "Unsupported CRX version '2'"
+            Should -Throw "*Unsupported CRX version '2'*"
     }
 }
 
@@ -267,7 +264,7 @@ Describe 'Get-WidevineVersionInfo' {
             -Value (@{ version = '4.10.2830.0' } | ConvertTo-Json)
 
         $info = Get-WidevineVersionInfo -WidevineRoot $root
-        $info.Version | Should Be '4.10.2830.0'
+        $info.Version | Should -Be '4.10.2830.0'
     }
 
     It 'selects the highest version numerically, not lexically' {
@@ -278,13 +275,13 @@ Describe 'Get-WidevineVersionInfo' {
                 -Value (@{ version = $v } | ConvertTo-Json)
         }
 
-        (Get-WidevineVersionInfo -WidevineRoot $root).Version | Should Be '4.10.10.0'
+        (Get-WidevineVersionInfo -WidevineRoot $root).Version | Should -Be '4.10.10.0'
     }
 
     It 'returns nothing for an empty root' {
         $root = Join-Path $TestDrive 'empty'
         New-Item -ItemType Directory -Force -Path $root | Out-Null
-        Get-WidevineVersionInfo -WidevineRoot $root | Should BeNullOrEmpty
+        Get-WidevineVersionInfo -WidevineRoot $root | Should -BeNullOrEmpty
     }
 
     It 'ignores _backup and staging directories when resolving installed version' {
@@ -298,6 +295,6 @@ Describe 'Get-WidevineVersionInfo' {
             -Value (@{ version = '4.10.3050.0' } | ConvertTo-Json)
 
         $info = Get-WidevineVersionInfo -WidevineRoot $root
-        $info.Version | Should Be '4.10.3050.0'
+        $info.Version | Should -Be '4.10.3050.0'
     }
 }
