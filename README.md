@@ -1,4 +1,4 @@
-# helium-widevine-windows
+# Helium-Widevine-Windows
 
 Windows Widevine installer for Helium.
 
